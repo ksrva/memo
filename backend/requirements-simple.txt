@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic>=2.0
+openai
+httpx
+python-dotenv
+nltk
+scikit-learn
+numpy
