@@ -27,6 +27,7 @@ class Panel {
   private page: PageContext = { url: '', title: '', selection: '', excerpt: '' };
   private searchTimer?: number;
   private searchMode: 'semantic' | 'keyword' = 'semantic';
+  private pageProblem = '';
 
   async start(): Promise<void> {
     this.wireTabs();
@@ -46,14 +47,52 @@ class Panel {
   private async readPage(): Promise<PageContext> {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     const blank = { url: tab?.url ?? '', title: tab?.title ?? '', selection: '', excerpt: '' };
-    if (!tab?.id || !/^https?:/.test(tab.url ?? '')) return blank;
 
-    try {
-      return (await chrome.tabs.sendMessage(tab.id, { action: 'getContext' })) ?? blank;
-    } catch {
-      // Content script not present (page loaded before install, or a restricted URL).
+    if (!tab?.id) return blank;
+    if (!/^https?:/.test(tab.url ?? '')) {
+      this.pageProblem = 'Memo can only read ordinary web pages, not browser pages.';
       return blank;
     }
+
+    // Preferred path: the content script, present on any page loaded since install.
+    try {
+      const ctx = await chrome.tabs.sendMessage(tab.id, { action: 'getContext' });
+      if (ctx) {
+        this.pageProblem = '';
+        return ctx;
+      }
+    } catch {
+      // No content script in this tab — it was already open when the extension
+      // was installed or reloaded. Fall through and inject on demand.
+    }
+
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const main =
+            document.querySelector('article') ??
+            document.querySelector('main') ??
+            document.querySelector('[role="main"]') ??
+            document.body;
+          return {
+            url: location.href,
+            title: document.title,
+            selection: (window.getSelection()?.toString() ?? '').trim().slice(0, 4000),
+            excerpt: (main?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000),
+          };
+        },
+      });
+      if (result?.result) {
+        this.pageProblem = '';
+        return result.result as PageContext;
+      }
+    } catch (err) {
+      this.pageProblem =
+        'Memo could not read this page. Reload the tab, then try again.';
+      console.warn('[memo] could not read page', err);
+    }
+    return blank;
   }
 
   private async refreshPage(): Promise<void> {
@@ -88,7 +127,8 @@ class Panel {
     const has = this.page.selection.length > 0;
     node.textContent = has
       ? this.page.selection
-      : 'Select text in the page, or leave blank to note the article as a whole.';
+      : this.pageProblem ||
+        'Select text in the page, or leave blank to note the article as a whole.';
     node.classList.toggle('is-empty', !has);
   }
 
@@ -134,8 +174,6 @@ class Panel {
     show(passage, Boolean(saved.passage));
 
     $('savedNote').textContent = saved.note;
-    $('savedClaim').textContent = saved.claim || '—';
-    $('savedQuestion').textContent = saved.open_question || '—';
 
     const tags = $('savedTags');
     clear(tags);
@@ -251,8 +289,8 @@ class Panel {
       // dress it up as a percentage match.
       meta.push(
         this.searchMode === 'keyword'
-          ? `keyword match in your ${hit.matched_on === 'note' ? 'take' : 'reading'}`
-          : `${Math.round(hit.score * 100)}% · matched your ${hit.matched_on === 'note' ? 'take' : 'reading'}`,
+          ? `keyword match in your ${hit.matched_on === 'note' ? 'notes' : 'reading'}`
+          : `${Math.round(hit.score * 100)}% · matched your ${hit.matched_on === 'note' ? 'notes' : 'reading'}`,
       );
     }
 

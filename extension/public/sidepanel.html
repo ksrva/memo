@@ -26,10 +26,10 @@
   <section id="welcome" class="view empty" hidden>
     <h2>Keep what you thought, not just what you read.</h2>
     <p>Highlight a passage on any page, write what you make of it, and save.
-       The article stays on the internet — your take doesn't exist anywhere else.</p>
+       The article stays on the internet — your notes don't exist anywhere else.</p>
     <ol class="steps">
       <li>Select text in the page</li>
-      <li>Write your take (required — that's the whole point)</li>
+      <li>Write your notes (required — that's the whole point)</li>
       <li>Save</li>
     </ol>
     <p class="muted">Later, find it by half-remembering the idea, and Memo will
@@ -46,7 +46,7 @@
     <label class="field">
       <span class="label-row">
         <span>Passage</span>
-        <button id="refreshSelection" class="link-btn" type="button">Use current selection</button>
+        <button id="refreshSelection" class="link-btn" type="button">Use highlighted</button>
       </span>
       <blockquote id="passage" class="passage is-empty">Select text in the page, or leave blank to note the article as a whole.</blockquote>
     </label>
@@ -62,9 +62,7 @@
     <article id="saved" class="note-card" hidden>
       <h3 id="savedTitle"></h3>
       <blockquote id="savedPassage" hidden></blockquote>
-      <p class="take"><strong>My take:</strong> <span id="savedNote"></span></p>
-      <p class="meta"><strong>Claim:</strong> <span id="savedClaim"></span></p>
-      <p class="meta"><strong>Open question:</strong> <span id="savedQuestion"></span></p>
+      <p class="take"><strong>Notes:</strong> <span id="savedNote"></span></p>
       <ul id="savedTags" class="tags"></ul>
       <div id="savedLinks" hidden>
         <h4>Connects to</h4>
@@ -79,7 +77,7 @@
       <input id="q" type="search" placeholder="Half-remember it: &quot;the one arguing against scale&quot;">
       <div class="scope" role="radiogroup" aria-label="Search scope">
         <label><input type="radio" name="scope" value="both" checked> Both</label>
-        <label><input type="radio" name="scope" value="note"> My takes</label>
+        <label><input type="radio" name="scope" value="note"> My notes</label>
         <label><input type="radio" name="scope" value="passage"> What I read</label>
       </div>
     </div>
