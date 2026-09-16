@@ -1,210 +1,244 @@
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import PlainTextResponse
-import time
-from datetime import datetime
-from ..models import (
-    ComposeRequest, ComposeResponse, SummarizeRequest, SummarizeResponse,
-    MemoryUpsertRequest, MemoryUpsertResponse, MemorySearchResponse, Memory
-)
-from ..services.context_service import ContextService
-from ..services.openai_service import OpenAIService
-from ..database import Database
+"""HTTP API.
 
+Services hang off `app.state` (see main.py) rather than module-level globals,
+so the app can be constructed with a temp database in tests and so importing
+this module never touches the network or the filesystem.
+"""
+
+import time
+import uuid
+from datetime import datetime, timezone
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
+
+from ..database import Database
+from ..models import (
+    Link, Note, NoteCreate, RelatedRequest, RelatedResponse,
+    SearchHit, SearchResponse,
+)
+from ..services.llm import LLMService
 
 router = APIRouter(prefix="/v1")
 
-# Initialize services (in production, use dependency injection)
-from dotenv import load_dotenv
-import os
-load_dotenv()
-
-database = Database()
-openai_service = OpenAIService()
-context_service = ContextService(openai_service, database)
+# How similar an earlier note must be before it is worth surfacing.
+LINK_THRESHOLD = 0.35
+MAX_LINKS = 4
 
 
-@router.post("/compose", response_model=ComposeResponse)
-async def compose_context(request: ComposeRequest):
-    """Build context bundle from page data"""
-    start_time = time.time()
-    success = False
-    
+def get_db(request: Request) -> Database:
+    return request.app.state.db
+
+
+def get_llm(request: Request) -> LLMService:
+    return request.app.state.llm
+
+
+class _Timer:
+    """Records latency/tokens/success for an endpoint without swallowing errors."""
+
+    def __init__(self, db: Database, endpoint: str):
+        self.db, self.endpoint, self.tokens = db, endpoint, 0
+        self.start = time.perf_counter()
+
+    def done(self, success: bool) -> None:
+        elapsed = (time.perf_counter() - self.start) * 1000
+        try:
+            self.db.record_metric(self.endpoint, elapsed, self.tokens, success)
+        except Exception:  # metrics must never break a request
+            pass
+
+
+@router.post("/notes", response_model=Note, status_code=201)
+def create_note(
+    payload: NoteCreate,
+    db: Database = Depends(get_db),
+    llm: LLMService = Depends(get_llm),
+) -> Note:
+    """Save a highlight plus the reader's take, enrich it, and link it to prior reading."""
+    timer = _Timer(db, "notes.create")
     try:
-        context_bundle = context_service.compose_context(request)
-        success = True
-        
-        return ComposeResponse(context_bundle=context_bundle)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Context composition failed: {str(e)}")
-    
-    finally:
-        latency_ms = (time.time() - start_time) * 1000
-        database.record_metric("compose", latency_ms, 0, success)
+        note_vec = llm.embed(payload.note)
+        passage_vec = llm.embed(payload.passage) if payload.passage else None
 
+        enrichment, tokens = llm.enrich(payload.title, payload.passage, payload.note)
+        timer.tokens += tokens
 
-@router.post("/summarize", response_model=SummarizeResponse)
-async def summarize_context(request: SummarizeRequest):
-    """Generate structured memo from context bundle"""
-    start_time = time.time()
-    success = False
-    tokens_used = 0
-    
-    try:
-        result = openai_service.summarize_context(request.context_bundle, request.goal)
-        tokens_used = result.pop("_tokens_used", 0)
-        success = True
-        
-        return SummarizeResponse(**result)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Summarization failed: {str(e)}")
-    
-    finally:
-        latency_ms = (time.time() - start_time) * 1000
-        database.record_metric("summarize", latency_ms, tokens_used, success)
+        # Find prior notes worth connecting to. Done before insert so the new
+        # note can't match itself.
+        candidates: List = []
+        if note_vec:
+            candidates = [
+                (n, s, on)
+                for n, s, on in db.search(note_vec, k=MAX_LINKS + 2, scope="both")
+                if s >= LINK_THRESHOLD
+            ][:MAX_LINKS]
 
-
-@router.post("/memory/upsert", response_model=MemoryUpsertResponse)
-async def upsert_memory(request: MemoryUpsertRequest):
-    """Save memo to memory store"""
-    start_time = time.time()
-    success = False
-    tokens_used = 0
-    
-    try:
-        # Generate embedding for the text
-        embedding = openai_service.get_embedding(request.text)
-        tokens_used = len(request.text.split()) // 4  # Rough token estimate
-        
-        # Store in database
-        memory_id = database.upsert_memory(
-            url=request.url,
-            title=request.title,
-            text=request.text,
-            tags=request.tags,
-            embedding=embedding,
-            ts=request.ts,
-            metadata=request.metadata
+        note = Note(
+            id=uuid.uuid4().hex[:12],
+            url=payload.url,
+            title=payload.title or payload.url,
+            passage=payload.passage,
+            note=payload.note,
+            claim=enrichment.claim,
+            open_question=enrichment.open_question,
+            tags=sorted({*payload.tags, *enrichment.tags}),
+            created_at=datetime.now(timezone.utc),
         )
-        
-        success = True
-        return MemoryUpsertResponse(id=memory_id)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Memory upsert failed: {str(e)}")
-    
-    finally:
-        latency_ms = (time.time() - start_time) * 1000
-        database.record_metric("memory_upsert", latency_ms, tokens_used, success)
+
+        links, tokens = llm.characterize_links(note, candidates)
+        timer.tokens += tokens
+        note.links = links
+
+        db.add_note(note, note_embedding=note_vec, passage_embedding=passage_vec)
+        timer.done(True)
+        return note
+    except Exception:
+        timer.done(False)
+        raise
 
 
-@router.get("/memory/search", response_model=MemorySearchResponse)
-async def search_memories(q: str, k: int = 5, url_filter: str = None):
-    """Search memories by text similarity"""
-    start_time = time.time()
-    success = False
-    tokens_used = 0
-    
+@router.get("/notes", response_model=List[Note])
+def list_notes(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    url: Optional[str] = None,
+    db: Database = Depends(get_db),
+) -> List[Note]:
+    return db.list_notes(limit=limit, offset=offset, url=url)
+
+
+@router.get("/notes/{note_id}", response_model=Note)
+def get_note(note_id: str, db: Database = Depends(get_db)) -> Note:
+    note = db.get_note(note_id)
+    if note is None:
+        raise HTTPException(status_code=404, detail="No note with that id")
+    return note
+
+
+@router.delete("/notes/{note_id}", status_code=204)
+def delete_note(note_id: str, db: Database = Depends(get_db)) -> None:
+    if not db.delete_note(note_id):
+        raise HTTPException(status_code=404, detail="No note with that id")
+
+
+@router.get("/search", response_model=SearchResponse)
+def search(
+    q: str = Query(min_length=1),
+    k: int = Query(8, ge=1, le=50),
+    scope: str = Query("both", pattern="^(note|passage|both)$"),
+    db: Database = Depends(get_db),
+    llm: LLMService = Depends(get_llm),
+) -> SearchResponse:
+    """Search your own thinking (`scope=note`), what you read (`scope=passage`), or both."""
+    timer = _Timer(db, "search")
     try:
-        # Generate query embedding
-        query_embedding = openai_service.get_embedding(q)
-        tokens_used = len(q.split()) // 4  # Rough token estimate
-        
-        # Search database
-        results = database.search_memories(query_embedding, k, url_filter)
-        
-        # Convert to Memory objects
-        memories = []
-        for result in results:
-            memory = Memory(
-                id=result["id"],
-                text=result["text"][:300],  # Truncate for response
-                why=f"similarity: {result['score']:.2f}",
-                score=result["score"]
+        vec = llm.embed(q)
+        if vec is not None:
+            results = db.search(vec, k=k, scope=scope)
+            mode = "semantic"
+            # A semantic miss can still be a lexical hit (exact names, jargon).
+            if not results:
+                results = db.search_lexical(q, k=k, scope=scope)
+                mode = "keyword" if results else "semantic"
+        else:
+            results = db.search_lexical(q, k=k, scope=scope)
+            mode = "keyword"
+
+        timer.done(True)
+        return SearchResponse(
+            query=q,
+            mode=mode,
+            hits=[SearchHit(note=n, score=sc, matched_on=on) for n, sc, on in results],
+        )
+    except Exception:
+        timer.done(False)
+        raise
+
+
+@router.post("/related", response_model=RelatedResponse)
+def related(
+    payload: RelatedRequest,
+    db: Database = Depends(get_db),
+    llm: LLMService = Depends(get_llm),
+) -> RelatedResponse:
+    """What prior reading bears on the page open right now.
+
+    This is the move a web search cannot make: it fires without being asked,
+    because you don't know you should search for something you've forgotten.
+    """
+    timer = _Timer(db, "related")
+    try:
+        probe = (payload.text or payload.title).strip()
+        if not probe:
+            timer.done(True)
+            return RelatedResponse(hits=[])
+
+        vec = llm.embed(probe)
+        if vec is not None:
+            results = [
+                (n, sc, on)
+                for n, sc, on in db.search(vec, k=6, scope="both")
+                if sc >= LINK_THRESHOLD and n.url != payload.url
+            ]
+        else:
+            results = db.search_lexical(probe, k=6, exclude_url=payload.url)
+
+        hits = [
+            Link(
+                note_id=n.id, title=n.title, url=n.url, note=n.note[:200],
+                relation="related", score=sc,
+                why=f"you noted this {'thought' if on == 'note' else 'passage'} before",
             )
-            memories.append(memory)
-        
-        success = True
-        return MemorySearchResponse(hits=memories)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Memory search failed: {str(e)}")
-    
-    finally:
-        latency_ms = (time.time() - start_time) * 1000
-        database.record_metric("memory_search", latency_ms, tokens_used, success)
-
-
-@router.get("/metrics")
-async def get_metrics():
-    """Get Prometheus-style metrics"""
-    try:
-        metrics_data = database.get_metrics()
-        
-        # Format as Prometheus text
-        prometheus_text = f"""# HELP memo_latency_p95 95th percentile latency in milliseconds
-# TYPE memo_latency_p95 gauge
-memo_latency_p95 {metrics_data['latency_p95']}
-
-# HELP memo_tokens_total Total tokens used
-# TYPE memo_tokens_total counter
-memo_tokens_total {metrics_data['token_usage_total']}
-
-# HELP memo_success_rate Success rate (0.0-1.0)
-# TYPE memo_success_rate gauge
-memo_success_rate {metrics_data['success_rate']}
-
-# HELP memo_memory_recall_rate Memory recall rate (0.0-1.0)
-# TYPE memo_memory_recall_rate gauge
-memo_memory_recall_rate {metrics_data['memory_recall_rate']}
-"""
-        
-        return PlainTextResponse(content=prometheus_text)
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Metrics retrieval failed: {str(e)}")
-
-
-@router.put("/memory/{memory_id}")
-async def update_memory(memory_id: str, request: MemoryUpsertRequest):
-    """Update an existing memo"""
-    start_time = time.time()
-    success = False
-    tokens_used = 0
-    
-    try:
-        # Generate new embedding if text changed
-        embedding = openai_service.get_embedding(request.text)
-        tokens_used = len(request.text.split()) // 4  # Rough token estimate
-        
-        # Update in database
-        updated = database.update_memory(
-            memory_id=memory_id,
-            url=request.url,
-            title=request.title,
-            text=request.text,
-            tags=request.tags,
-            embedding=embedding,
-            ts=request.ts,
-            metadata=request.metadata
-        )
-        
-        if not updated:
-            raise HTTPException(status_code=404, detail="Memory not found")
-        
-        success = True
-        return {"id": memory_id, "updated": True}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Memory update failed: {str(e)}")
-    
-    finally:
-        latency_ms = (time.time() - start_time) * 1000
-        database.record_metric("memory_update", latency_ms, tokens_used, success)
+            for n, sc, on in results[:5]
+        ]
+        timer.done(True)
+        return RelatedResponse(hits=hits)
+    except Exception:
+        timer.done(False)
+        raise
 
 
 @router.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+def health(request: Request, db: Database = Depends(get_db)) -> dict:
+    """Reports what is actually working, not merely what is configured.
+
+    A key that is present but rejected is reported as an error rather than "on" —
+    otherwise the only visible symptom is search quietly returning nothing.
+    """
+    llm: LLMService = request.app.state.llm
+    embed = llm.embed_status
+    return {
+        "status": "healthy",
+        "notes": db.count(),
+        "search": "semantic" if embed.ok else "keyword",
+        "embeddings": {
+            "provider": embed.name,
+            "model": embed.model,
+            "dimensions": embed.dim,
+            "state": "on" if embed.ok else ("off" if embed.name == "none" else "error"),
+            "detail": embed.detail,
+        },
+        "enrichment": "on" if llm.enabled else "off (no OPENAI_API_KEY)",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/metrics", response_class=PlainTextResponse)
+def metrics(db: Database = Depends(get_db)) -> str:
+    m = db.metrics_summary()
+    return (
+        "# HELP memo_notes_total Notes saved\n"
+        "# TYPE memo_notes_total gauge\n"
+        f"memo_notes_total {m['notes']}\n\n"
+        "# HELP memo_latency_p95_ms 95th percentile request latency\n"
+        "# TYPE memo_latency_p95_ms gauge\n"
+        f"memo_latency_p95_ms {m['latency_p95']:.2f}\n\n"
+        "# HELP memo_tokens_total LLM tokens consumed\n"
+        "# TYPE memo_tokens_total counter\n"
+        f"memo_tokens_total {m['tokens_total']}\n\n"
+        "# HELP memo_success_rate Fraction of requests that succeeded\n"
+        "# TYPE memo_success_rate gauge\n"
+        f"memo_success_rate {m['success_rate']:.4f}\n"
+    )
