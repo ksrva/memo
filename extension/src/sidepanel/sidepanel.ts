@@ -5,7 +5,10 @@
  * textContent or the `el()` builder. No template-literal HTML anywhere.
  */
 
-import { api, ApiError, Link, Note, SearchHit } from '../shared/api';
+import {
+  api, ApiError, currentBackend, DEFAULT_BACKEND, loadBackend, Link, Note,
+  saveBackend, SearchHit,
+} from '../shared/api';
 import { $, clear, el, relative, safeLink, show } from '../shared/dom';
 
 interface PageContext {
@@ -30,6 +33,8 @@ class Panel {
   private pageProblem = '';
 
   async start(): Promise<void> {
+    await loadBackend();
+    this.wireSettings();
     this.wireTabs();
     this.wireCapture();
     this.wireSearch();
@@ -40,6 +45,24 @@ class Panel {
 
     await this.refreshPage();
     await this.refreshFirstRun();
+  }
+
+  private wireSettings(): void {
+    const input = $<HTMLInputElement>('backendUrl');
+    input.value = currentBackend();
+    input.placeholder = DEFAULT_BACKEND;
+
+    const commit = async () => {
+      const value = input.value.trim() || DEFAULT_BACKEND;
+      await saveBackend(value);
+      input.value = currentBackend();
+      await this.refreshFirstRun();
+      await this.refreshPage();
+    };
+    $('saveBackend').addEventListener('click', () => void commit());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') void commit();
+    });
   }
 
   // --- chrome plumbing ------------------------------------------------

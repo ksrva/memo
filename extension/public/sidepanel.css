@@ -131,3 +131,13 @@ a { color: var(--accent); }
 .scope label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 
 .banner.subtle { background: none; color: var(--muted); border-bottom: 1px solid var(--line); }
+
+.settings { border-bottom: 1px solid var(--line); font-size: 12px; }
+.settings summary {
+  padding: 8px 16px; color: var(--muted); cursor: pointer; list-style: none;
+}
+.settings summary::-webkit-details-marker { display: none; }
+.settings summary::before { content: "\2699\FE0E  "; }
+.settings-body { padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.settings-body input { flex: 1 1 180px; padding: 6px 8px; font-size: 12px; }
+.settings-body p { flex: 1 1 100%; margin: 0; }

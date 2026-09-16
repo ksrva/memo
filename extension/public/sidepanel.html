@@ -19,8 +19,18 @@
   <p id="modeNote" class="banner subtle" hidden></p>
 
   <div id="offline" class="banner" hidden>
-    Backend unreachable. Start it with <code>./scripts/start-dev.sh</code>.
+    Can't reach Memo's server. Start it with <code>./scripts/start-dev.sh</code>,
+    or check the address below.
   </div>
+
+  <details id="settings" class="settings">
+    <summary>Server address</summary>
+    <div class="settings-body">
+      <input id="backendUrl" type="url" spellcheck="false" placeholder="http://localhost:8000">
+      <button id="saveBackend" class="link-btn" type="button">Save</button>
+      <p class="muted">Change this if you started the server on a different port.</p>
+    </div>
+  </details>
 
   <!-- First run: the empty state is a designed screen, not a blank panel. -->
   <section id="welcome" class="view empty" hidden>

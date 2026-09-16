@@ -29,14 +29,36 @@ export interface SearchHit {
   matched_on: 'note' | 'passage';
 }
 
-export const API_BASE = 'http://localhost:8001/v1';
+export const DEFAULT_BACKEND = 'http://localhost:8000';
+
+let backend = DEFAULT_BACKEND;
+
+/** Read the saved backend URL. Falls back to the default if storage is empty. */
+export async function loadBackend(): Promise<string> {
+  try {
+    const { backendUrl } = await chrome.storage.local.get('backendUrl');
+    if (typeof backendUrl === 'string' && backendUrl) backend = backendUrl;
+  } catch {
+    // storage unavailable; keep the default
+  }
+  return backend;
+}
+
+export async function saveBackend(url: string): Promise<void> {
+  backend = url.replace(/\/+$/, '');
+  await chrome.storage.local.set({ backendUrl: backend });
+}
+
+export function currentBackend(): string {
+  return backend;
+}
 
 export class ApiError extends Error {}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    res = await fetch(`${backend}/v1${path}`, {
       ...init,
       headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     });
