@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  backend:
+    # Builds from an empty container every run: clean checkout, no database,
+    # no API key. That is precisely the state the v1 bugs hid from.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tests
+        working-directory: backend
+        run: pytest -q
+
+      - name: Boot with no API key and serve a request
+        working-directory: backend
+        env:
+          MEMO_DB_PATH: ${{ runner.temp }}/ci.db
+        run: |
+          python -m uvicorn app.main:app --port 8000 &
+          for _ in $(seq 1 30); do
+            curl -sf localhost:8000/v1/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf localhost:8000/v1/health | tee /dev/stderr | grep -q '"search":"keyword"'
+          curl -sf -X POST localhost:8000/v1/notes \
+            -H 'Content-Type: application/json' \
+            -d '{"url":"https://example.com","title":"T","passage":"p","note":"my take"}' \
+            | grep -q '"note":"my take"'
+          curl -sf --get localhost:8000/v1/search --data-urlencode 'q=my take' | grep -q '"mode":"keyword"'
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - working-directory: extension
+        run: npm ci
+      - name: Typecheck
+        working-directory: extension
+        run: npm run typecheck
+      - name: Build
+        working-directory: extension
+        run: npm run build

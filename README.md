@@ -1,126 +1,134 @@
-# Memo - Context-Aware Memory & Summarization API
+# Memo
 
-A browser-native assistant that captures page context, stores searchable memories, and generates structured memos.
+**Search finds what the world wrote. Memo finds what you thought.**
 
-## Architecture
+A reading tool. Highlight a passage, write what you make of it, save. Later, find
+it again by half-remembering the idea — and when you read something that argues
+with a note you took months ago, Memo says so.
 
-- **Backend**: FastAPI + SQLite + Vector Search
-- **Frontend**: Chrome Extension (MV3, TypeScript) 
-- **LLM**: OpenAI GPT-4 + Embeddings
-- **Storage**: SQLite with sqlite-vss for vector search
-- **Eval**: Playwright automation testing
+The article stays on the internet and can be re-found and re-summarised any time.
+Your reaction to it can't be recovered from anywhere. Memo stores that half.
 
-## Features
-**Context Capture**: Page text, title, URL, selections, recent clicks  
-**Smart Memos**: AI-generated summaries with entities, tasks, and risks  
-**Memory Store**: Searchable past memos with semantic similarity  
-**REST API**: Clean endpoints for external integrations  
-**Chrome Extension**: One-click memo creation with side panel UI  
+---
 
-## Prerequisites
+## The rule
 
-- **Python**: 3.8 or higher
-- **Node.js**: 16.0 or higher  
-- **Chrome Browser**: Latest version
-- **OpenAI API Key**: Required for LLM functionality
+**The machine never writes your opinion.** A note without your own words is
+rejected by the API, not just discouraged by the UI:
 
-## Setup Instructions
+```
+$ curl -X POST localhost:8000/v1/notes -d '{"url":"...","note":"   "}'
+{"detail":[{"msg":"Value error, A note needs your own words — that is the point of the tool."}]}
+```
 
-### 1. Backend Setup
+The LLM's job is to describe the *source* — one sentence on what the passage
+argues, one genuine open question, a few tags — and to label how a new note
+relates to your earlier ones (`agrees`, `contradicts`, `extends`, `example_of`).
+It never drafts your take.
+
+## Running it
+
+Memo runs at three tiers and picks the best one available without being told.
+
+| | What you get | Setup |
+|---|---|---|
+| **Keyword** | Full capture; search by word (SQLite FTS5) | none |
+| **Ollama** | Search by meaning, free, offline, private | `ollama pull nomic-embed-text` |
+| **OpenAI** | Search by meaning + enrichment and link labelling | `OPENAI_API_KEY` |
+
+No tier is a stub. The keyword tier saves, lists, searches, and surfaces related
+notes — it just needs roughly the right words, where semantic search doesn't.
+
 ```bash
-cd backend
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-cp .env.example .env
-# Edit .env and add your OpenAI API key: OPENAI_API_KEY=sk-...
-
-# Start the server
-python -m app.main
+./scripts/start-dev.sh          # creates a venv, installs, serves on :8000
 ```
 
-The backend will start on http://localhost:8000
-
-### 2. Extension Setup
 ```bash
-cd extension
-
-# Install dependencies
-npm install
-
-# Build the extension
-npm run build
+cd extension && npm install && npm run build
+# chrome://extensions -> Developer mode -> Load unpacked -> extension/dist/
 ```
 
-**Load Extension in Chrome:**
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable "Developer mode" (top right toggle)
-3. Click "Load unpacked" 
-4. Select the `extension/dist/` folder
-5. The Memo extension should appear in your toolbar
+Check which tier you're on:
 
-### 3. Testing the Setup
 ```bash
-cd eval
-
-# Install test dependencies  
-npm install
-
-# Run end-to-end tests
-npx playwright test
+curl -s localhost:8000/v1/health
+{"status":"healthy","notes":0,"search":"keyword",
+ "embeddings":{"provider":"none","state":"off","detail":"..."},
+ "enrichment":"off (no OPENAI_API_KEY)"}
 ```
 
-**Manual Testing:**
-1. Navigate to any webpage
-2. Click the Memo extension icon
-3. Click "Create Memo" to generate a summary
-4. View saved memos in the side panel
+A key that is present but **rejected** reports `"state":"error"` with the
+provider's message, rather than claiming to be on and then silently returning no
+results.
 
-## API Endpoints
+### Going semantic
 
-| Endpoint | Method | Description |
-|----------|---------|-------------|
-| `/v1/compose` | POST | Build context bundle from page data |
-| `/v1/summarize` | POST | Generate structured memo |
-| `/v1/memory/upsert` | POST | Save memo to memory store |
-| `/v1/memory/search` | GET | Search past memos |
-| `/v1/metrics` | GET | Prometheus metrics |
+```bash
+# free, private, offline — nothing leaves the machine
+ollama pull nomic-embed-text
 
-## Project Structure
-
-```
-memo/
-├── backend/          # FastAPI server
-│   ├── app/         # Application code
-│   ├── requirements.txt
-│   └── .env.example
-├── extension/       # Chrome Extension
-│   ├── src/        # TypeScript source
-│   ├── public/     # Manifest and assets
-│   └── dist/       # Built extension
-├── eval/           # Playwright tests
-└── README.md
+# or, for enrichment as well
+cp backend/.env.example backend/.env && echo 'OPENAI_API_KEY=sk-...' >> backend/.env
 ```
 
-## Troubleshooting
+Vectors from different models aren't comparable even at the same dimension, so
+the store records which model built it and **refuses to open** under a different
+one rather than returning plausible nonsense. Switching means a new database.
 
-**Backend Issues:**
-- Ensure Python 3.8+ is installed: `python --version`
-- Virtual environment activated before installing packages
-- OpenAI API key is valid and has credits
+## API
 
-**Extension Issues:**
-- Clear Chrome extension errors in `chrome://extensions/`
-- Reload extension after code changes
-- Check browser console for JavaScript errors
+| | |
+|---|---|
+| `POST /v1/notes` | Save a highlight + your take; enrich and link it |
+| `GET /v1/notes` | Recent notes, newest first |
+| `GET /v1/notes/{id}` · `DELETE /v1/notes/{id}` | One note |
+| `GET /v1/search?q=&scope=note\|passage\|both` | Search your takes, your reading, or both |
+| `POST /v1/related` | What prior reading bears on the page you're on |
+| `GET /v1/health` · `GET /v1/metrics` | Status; Prometheus metrics |
 
-**Database Issues:**
-- SQLite database auto-creates on first run
-- Check `memo_db.sqlite` file exists in backend folder
+`scope` is the part worth noticing: your words and the author's words are
+embedded separately, so *"where was I sceptical about scaling"* and *"what have I
+read about scaling"* are different queries.
 
+## Design notes
+
+**Storage.** SQLite + [sqlite-vec](https://github.com/asg017/sqlite-vec), keyed
+by note id. 768-dim embeddings, measured at ~7 KB per note — about 70 MB at
+10,000 notes, which is five years of reading at five notes a day.
+
+**Degradation is a feature.** No key, no network, no model: the app still boots,
+still saves, still searches. Every failure path was chosen so the visible symptom
+matches the actual cause.
+
+## Tests
+
+```bash
+cd backend && pytest -q        # 29 tests, no API key, no network
+```
+
+The stub embedder is a hashed bag-of-words, so similarity thresholds are
+genuinely exercised rather than mocked past. CI additionally builds from an empty
+container with no key and asserts a real request round-trips — the state in which
+most of this project's early bugs were invisible.
+
+## Project layout
+
+```
+backend/
+  app/
+    api/v1.py            HTTP surface
+    services/
+      embeddings.py      provider resolution: openai -> ollama -> none
+      llm.py             enrichment and link labelling
+    database.py          SQLite + sqlite-vec + FTS5
+    models.py            Note is the unit; `note` is required
+  tests/                 29 tests, all offline
+extension/
+  src/shared/            typed API client, safe DOM builders
+  src/sidepanel/         capture, search, recent
+  src/content/           reports the current selection
+```
+
+## License
+
+MIT
