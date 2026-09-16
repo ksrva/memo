@@ -1,29 +1,19 @@
-// Minimal test service worker
-console.log('MEMO: Service worker loaded');
+/** Opens the side panel when the toolbar icon is clicked. */
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('MEMO: Extension installed');
+  chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((err) => console.error('[memo] side panel setup failed', err));
 });
 
-chrome.action.onClicked.addListener((tab) => {
-  console.log('MEMO: Icon clicked');
-  chrome.tabs.create({ 
-    url: chrome.runtime.getURL('sidepanel.html')
-  });
+// Let the panel know when the user moves to a different page, so it can refresh
+// the passage and ask what prior reading is relevant here.
+chrome.tabs.onActivated.addListener(() => {
+  chrome.runtime.sendMessage({ action: 'tabChanged' }).catch(() => {});
 });
 
-// Handle messages from content script
-chrome.runtime.onMessage.addListener((request, sender) => {
-  console.log('Message received:', request);
-  if (request.action === 'openSidePanel' && sender.tab) {
-    // Trigger the action click handler
-    chrome.tabs.create({ url: chrome.runtime.getURL('sidepanel.html') });
-  }
-});
-
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === 'createMemo' && tab) {
-    // Open sidepanel
-    chrome.tabs.create({ url: chrome.runtime.getURL('sidepanel.html') });
+chrome.tabs.onUpdated.addListener((_id, info) => {
+  if (info.status === 'complete') {
+    chrome.runtime.sendMessage({ action: 'tabChanged' }).catch(() => {});
   }
 });

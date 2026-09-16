@@ -1,11 +1,98 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Memo Side Panel</title>
+  <title>Memo</title>
+  <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
+  <header class="bar">
+    <h1>Memo</h1>
+    <nav class="tabs" role="tablist">
+      <button class="tab is-active" data-view="capture" role="tab">Capture</button>
+      <button class="tab" data-view="search" role="tab">Search</button>
+      <button class="tab" data-view="recent" role="tab">Recent</button>
+    </nav>
+  </header>
+
+  <p id="modeNote" class="banner subtle" hidden></p>
+
+  <div id="offline" class="banner" hidden>
+    Backend unreachable. Start it with <code>./scripts/start-dev.sh</code>.
+  </div>
+
+  <!-- First run: the empty state is a designed screen, not a blank panel. -->
+  <section id="welcome" class="view empty" hidden>
+    <h2>Keep what you thought, not just what you read.</h2>
+    <p>Highlight a passage on any page, write what you make of it, and save.
+       The article stays on the internet — your take doesn't exist anywhere else.</p>
+    <ol class="steps">
+      <li>Select text in the page</li>
+      <li>Write your take (required — that's the whole point)</li>
+      <li>Save</li>
+    </ol>
+    <p class="muted">Later, find it by half-remembering the idea, and Memo will
+       surface it again when you read something that argues with it.</p>
+  </section>
+
+  <!-- Capture -->
+  <section id="capture" class="view">
+    <div id="relatedStrip" class="related-strip" hidden>
+      <h3>You've read about this before</h3>
+      <ul id="relatedList" class="link-list"></ul>
+    </div>
+
+    <label class="field">
+      <span class="label-row">
+        <span>Passage</span>
+        <button id="refreshSelection" class="link-btn" type="button">Use current selection</button>
+      </span>
+      <blockquote id="passage" class="passage is-empty">Select text in the page, or leave blank to note the article as a whole.</blockquote>
+    </label>
+
+    <label class="field">
+      <span class="label-row"><span>Your take</span><span id="noteCount" class="muted">0</span></span>
+      <textarea id="note" rows="5" placeholder="What do you make of it? Disagree with it? What does it remind you of?"></textarea>
+    </label>
+
+    <button id="save" class="primary" disabled>Save note</button>
+    <p id="captureHint" class="muted hint">A note needs your own words.</p>
+
+    <article id="saved" class="note-card" hidden>
+      <h3 id="savedTitle"></h3>
+      <blockquote id="savedPassage" hidden></blockquote>
+      <p class="take"><strong>My take:</strong> <span id="savedNote"></span></p>
+      <p class="meta"><strong>Claim:</strong> <span id="savedClaim"></span></p>
+      <p class="meta"><strong>Open question:</strong> <span id="savedQuestion"></span></p>
+      <ul id="savedTags" class="tags"></ul>
+      <div id="savedLinks" hidden>
+        <h4>Connects to</h4>
+        <ul id="savedLinksList" class="link-list"></ul>
+      </div>
+    </article>
+  </section>
+
+  <!-- Search -->
+  <section id="search" class="view" hidden>
+    <div class="field">
+      <input id="q" type="search" placeholder="Half-remember it: &quot;the one arguing against scale&quot;">
+      <div class="scope" role="radiogroup" aria-label="Search scope">
+        <label><input type="radio" name="scope" value="both" checked> Both</label>
+        <label><input type="radio" name="scope" value="note"> My takes</label>
+        <label><input type="radio" name="scope" value="passage"> What I read</label>
+      </div>
+    </div>
+    <ul id="results" class="note-list"></ul>
+    <p id="searchEmpty" class="muted" hidden></p>
+  </section>
+
+  <!-- Recent -->
+  <section id="recent" class="view" hidden>
+    <ul id="recentList" class="note-list"></ul>
+    <p id="recentEmpty" class="muted" hidden>No notes yet.</p>
+  </section>
+
   <script src="sidepanel.js"></script>
 </body>
 </html>
