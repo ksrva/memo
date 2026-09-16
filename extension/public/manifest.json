@@ -3,12 +3,45 @@
   "name": "Memo",
   "version": "2.0.0",
   "description": "Save a passage and what you thought of it. Find it later by half-remembering the idea.",
-  "permissions": ["activeTab", "scripting", "sidePanel", "tabs", "storage"],
-  "host_permissions": ["http://localhost:8001/*"],
-  "background": { "service_worker": "background.js" },
-  "content_scripts": [
-    { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "sidePanel",
+    "tabs",
+    "storage"
   ],
-  "side_panel": { "default_path": "sidepanel.html" },
-  "action": { "default_title": "Memo — save what you thought" }
+  "host_permissions": [
+    "http://localhost:8001/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Memo \u2014 save what you thought",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  }
 }
