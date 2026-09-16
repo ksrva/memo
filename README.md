@@ -33,8 +33,8 @@ Memo runs at three tiers and picks the best one available without being told.
 | | What you get | Setup |
 |---|---|---|
 | **Keyword** | Full capture; search by word (SQLite FTS5) | none |
-| **Ollama** | Search by meaning, free, offline, private | `ollama pull nomic-embed-text` |
-| **OpenAI** | Search by meaning + enrichment and link labelling | `OPENAI_API_KEY` |
+| **Ollama** | Semantic search, free, offline, private | `ollama pull nomic-embed-text` |
+| **OpenAI** | Semantic search + enrichment and link labelling | `OPENAI_API_KEY` |
 
 No tier is a stub. The keyword tier saves, lists, searches, and surfaces related
 notes — it just needs roughly the right words, where semantic search doesn't.

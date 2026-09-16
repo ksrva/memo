@@ -58,7 +58,7 @@ class EmbeddingProvider:
         return ProviderStatus(
             self.name, self.model, self.dim, ok=False,
             detail="No embedding provider — search uses keyword matching. "
-                   "Set OPENAI_API_KEY, or run Ollama, for search by meaning.",
+                   "Set OPENAI_API_KEY, or run Ollama, for semantic search.",
         )
 
     @property

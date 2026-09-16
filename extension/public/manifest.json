@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "description": "Save a passage and what you thought of it. Find it later by half-remembering the idea.",
   "permissions": ["activeTab", "sidePanel", "tabs", "storage"],
-  "host_permissions": ["http://localhost:8000/*"],
+  "host_permissions": ["http://localhost:8001/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }

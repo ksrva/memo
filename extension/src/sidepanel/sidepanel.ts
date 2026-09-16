@@ -69,10 +69,9 @@ class Panel {
     const save = $<HTMLButtonElement>('save');
 
     note.addEventListener('input', () => {
-      const filled = note.value.trim().length > 0;
-      save.disabled = !filled;
+      save.disabled = note.value.trim().length === 0;
       $('noteCount').textContent = String(note.value.trim().length);
-      show($('captureHint'), !filled);
+      show($('captureHint'), false);
     });
 
     // Cmd/Ctrl+Enter saves, so capture never needs the mouse.
@@ -218,7 +217,7 @@ class Panel {
         ? ''
         : mode === 'keyword'
           ? 'No note contains those words. Keyword search needs roughly the right wording — ' +
-            'add an embedding provider to search by meaning instead.'
+            'add an embedding provider to run semantic search instead.'
           : 'Nothing yet. Notes you save become findable here by the shape of the idea.';
       show(empty, hits.length === 0);
       this.setOffline(false);
@@ -299,7 +298,7 @@ class Panel {
         show(mode, true);
       } else if (health.search === 'keyword') {
         mode.textContent =
-          'Keyword search. Set OPENAI_API_KEY or run Ollama to search by meaning.';
+          'Keyword search. Set OPENAI_API_KEY or run Ollama for semantic search.';
         show(mode, true);
       } else {
         show(mode, false);
